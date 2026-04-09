@@ -8,14 +8,14 @@ from sklearn.datasets import make_blobs
 st.set_page_config(page_title="客戶借貸風險評估", layout="wide")
 st.title("One-Against-All SVM 客戶借貸風險預測")
 
-# 1. 產生 150 筆資料 (三個群落)
-# 中心點大約設在：高風險(45, 25), 低風險(65, 12), 待審查(80, 25)
-centers = [[45, 23], [65, 12], [78, 25]]
-X, y = make_blobs(n_samples=150, centers=centers, cluster_std=3.5, random_state=42)
+# 1. 產生更「亂」的 150 筆資料
+# 增加 cluster_std (從 3.5 改到 6.5)，並讓中心點更接近
+centers = [[48, 22], [62, 15], [75, 25]] 
+X, y = make_blobs(n_samples=150, centers=centers, cluster_std=6.5, random_state=42)
 
-# 2. 訓練 One-Against-All SVM (scikit-learn 的 SVC 預設即支援 OVR/OAA)
-# decision_function_shape='ovr' 即是一對多策略
-clf = svm.SVC(kernel='linear', C=1.0, decision_function_shape='ovr')
+# 2. 調整 SVM 參數，使用較小的 C 值 (例如 0.1 或 0.5)
+# 這會讓模型允許一些點「出軌」，這才叫現實
+clf = svm.SVC(kernel='rbf', C=0.5, gamma=0.01, decision_function_shape='ovr')
 clf.fit(X, y)
 
 # 3. 側邊欄：使用者輸入資料
