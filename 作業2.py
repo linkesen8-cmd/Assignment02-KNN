@@ -1,110 +1,68 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
-from sklearn.svm import SVC
-from sklearn.metrics import confusion_matrix
+from sklearn import svm
+from sklearn.datasets import make_blobs
 
-# ==========================================
-# 1. 網頁基本設定
-# ==========================================
-st.set_page_config(page_title="SVM 成績分類器 (Linear)", layout="wide")
-st.title("Assignment: SVM 成績及格與不及格分類 (第一小題)")
-st.markdown("使用 SVM 的 **線性核函數 (Linear Kernel)** 來預測成績，並觀察 C 值的影響。")
+# 設定網頁標題與風格
+st.set_page_config(page_title="客戶借貸風險評估", layout="wide")
+st.title("One-Against-All SVM 客戶借貸風險預測")
 
-# ==========================================
-# 2. 側邊欄：讓使用者自訂 C 值
-# ==========================================
-st.sidebar.header("SVM 參數設定")
-c_options = [0.001, 0.01, 0.1, 1.0, 10.0, 50.0, 100.0]
-c_value = st.sidebar.select_slider("選擇 C 值大小 (懲罰係數)", options=c_options, value=1.0)
+# 1. 產生 150 筆資料 (三個群落)
+# 中心點大約設在：高風險(45, 25), 低風險(65, 12), 待審查(80, 25)
+centers = [[45, 23], [65, 12], [78, 25]]
+X, y = make_blobs(n_samples=150, centers=centers, cluster_std=3.5, random_state=42)
 
-# ==========================================
-# 3. 生成 200 筆模擬資料
-# ==========================================
-@st.cache_data
-def load_data():
-    np.random.seed(42)
-    n_samples = 200
-    
-    study_hours = np.random.uniform(140, 200, n_samples)
-    practice_qs = np.random.uniform(30, 100, n_samples)
-    X = np.column_stack((study_hours, practice_qs))
-    
-    # 產生線性可分的資料並加入雜訊
-    score = (study_hours - 140)/60 * 0.5 + (practice_qs - 30)/70 * 0.5 + np.random.normal(0, 0.2, n_samples)
-    y = np.where(score > 0.5, 1, 0)
-    
-    return X, y
+# 2. 訓練 One-Against-All SVM (scikit-learn 的 SVC 預設即支援 OVR/OAA)
+# decision_function_shape='ovr' 即是一對多策略
+clf = svm.SVC(kernel='linear', C=1.0, decision_function_shape='ovr')
+clf.fit(X, y)
 
-X, y = load_data()
+# 3. 側邊欄：使用者輸入資料
+st.sidebar.header("--- 輸入客戶新資料 ---")
+input_income = st.sidebar.number_input("輸入收入 (萬)", min_value=0.0, max_value=100.0, value=60.0)
+input_debt = st.sidebar.number_input("輸入負債 (萬)", min_value=0.0, max_value=100.0, value=10.0)
 
-# ==========================================
-# 4. 建立 SVM 模型與預測 (🎯 考點：改為 Linear)
-# ==========================================
-# 將核函數設定為 'linear'，就會畫出跟老師截圖一樣的筆直線條！
-svm_model = SVC(kernel='linear', C=c_value)
-svm_model.fit(X, y)
+X_user = np.array([[input_income, input_debt]])
+y_pred = clf.predict(X_user)[0]
 
-y_pred = svm_model.predict(X)
+# 定義標籤名稱與顏色
+labels = {0: "高風險", 1: "低風險", 2: "待審查"}
+risk_result = labels[y_pred]
 
-# ==========================================
-# 5. 計算 Confusion Matrix 與效能指標
-# ==========================================
-tn, fp, fn, tp = confusion_matrix(y, y_pred).ravel()
+# 4. 顯示結果 (及格綠色，不及格紅色)
+# 假設「低風險」與「待審查」算及格，「高風險」算不及格
+if risk_result == "高風險":
+    st.markdown(f"### 預測結果：<span style='color:red'>{risk_result}</span>", unsafe_allow_html=True)
+else:
+    st.markdown(f"### 預測結果：<span style='color:green'>{risk_result}</span>", unsafe_allow_html=True)
 
-precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-accuracy = (tp + tn) / len(y)
-f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-error_rate = 1 - accuracy
+st.write(f"輸入座標：收入 {input_income} 萬，債務 {input_debt} 萬")
 
-# ==========================================
-# 6. 在網頁上呈現效能指標
-# ==========================================
-st.subheader(f"📊 當 C = {c_value} 時的效能指標")
-st.write(f"**混淆矩陣 (Confusion Matrix):** TN = {tn}, FP = {fp}, FN = {fn}, TP = {tp}")
+# 5. 繪圖
+fig, ax = plt.subplots(figsize=(10, 6))
 
-col1, col2, col3, col4, col5, col6 = st.columns(6)
-col1.metric("Precision", f"{precision:.4f}")
-col2.metric("Recall", f"{recall:.4f}")
-col3.metric("Specificity", f"{specificity:.4f}")
-col4.metric("Accuracy", f"{accuracy:.4f}")
-col5.metric("F1-score", f"{f1_score:.4f}")
-col6.metric("Error rate", f"{error_rate:.4f}")
+# 畫出決策區域底色
+xx, yy = np.meshgrid(np.linspace(30, 95, 500), np.linspace(-5, 50, 500))
+Z = clf.predict(np.c_[xx.ravel(), yy.ravel()])
+Z = Z.reshape(xx.shape)
+ax.contourf(xx, yy, Z, alpha=0.1, colors=['red', 'blue', 'orange'])
 
-st.divider()
+# 繪製原始資料點
+colors = ['red', 'blue', 'orange']
+for i, label in labels.items():
+    mask = (y == i)
+    ax.scatter(X[mask, 0], X[mask, 1], c=colors[i], label=label, edgecolors='k', alpha=0.7)
 
-# ==========================================
-# 7. 繪製 2D 線性決策邊界圖
-# ==========================================
-st.subheader("🗺️ SVM 決策邊界視覺化 (Linear Kernel)")
+# 繪製使用者輸入的點 (星星)
+ax.scatter(input_income, input_debt, c='yellow', marker='*', s=300, edgecolors='black', label=f'輸入: {risk_result}')
+ax.annotate(f"({input_income}, {input_debt})", (input_income + 1, input_debt + 1), weight='bold')
 
-fig, ax = plt.subplots(figsize=(10, 5))
+ax.set_title("One-Against-All SVM Prediction")
+ax.set_xlabel("Income (x1)")
+ax.set_ylabel("Debt (x2)")
+ax.legend()
+ax.grid(True, linestyle='--', alpha=0.5)
 
-x_min, x_max = 135, 205
-y_min, y_max = 25, 105
-xx, yy = np.meshgrid(np.arange(x_min, x_max, 0.5),
-                     np.arange(y_min, y_max, 0.5))
-
-Z = svm_model.predict(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
-
-# 作業要求：及格綠色(1)，不及格紅色(0)
-cmap_light = ListedColormap(['#fcded9', '#dcedc1'])
-ax.contourf(xx, yy, Z, cmap=cmap_light)
-
-colors = ['red' if label == 0 else 'green' for label in y]
-ax.scatter(X[:, 0], X[:, 1], c=colors, edgecolors='k', s=25, alpha=0.8)
-
-ax.scatter([], [], c='green', edgecolors='k', s=25, label='Pass (及格)')
-ax.scatter([], [], c='red', edgecolors='k', s=25, label='Fail (不及格)')
-ax.legend(loc='upper left')
-
-ax.set_title(f"Linear SVM Classification (C={c_value})")
-ax.set_xlabel("Monthly Study Time (140~200 hours)")
-ax.set_ylabel("Monthly Practice Questions (30~100 Qs)")
-ax.spines['top'].set_visible(False)
-ax.spines['right'].set_visible(False)
-
+# 將圖表顯示在 Streamlit 網頁上
 st.pyplot(fig)
