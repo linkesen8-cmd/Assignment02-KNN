@@ -2,123 +2,120 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from sklearn.metrics import confusion_matrix
 
 # ==========================================
-# 1. 網頁基本設定
+# 1. 網頁基本設定 (使用寬版排版)
 # ==========================================
-st.set_page_config(page_title="SVM 成績分類器", layout="wide")
-st.title("Assignment: SVM 成績及格與不及格分類")
-st.markdown("基於 **每月讀書時間** 與 **作業練習題數**，使用 **SVM (支持向量機)** 預測是否及格。")
+st.set_page_config(page_title="k-NN vs SVM 模型比較", layout="wide")
+st.title("Assignment: k-NN vs SVM 決策邊界與效能比較")
+st.markdown("左右對照 **k-NN (切比雪夫距離)** 與 **SVM (RBF 高斯核)** 在相同資料集下的分類表現。")
 
 # ==========================================
-# 2. 側邊欄：讓使用者自訂 C 值 (0.001 ~ 100)
+# 2. 側邊欄：兩種模型的參數設定
 # ==========================================
-st.sidebar.header("SVM 參數設定")
-# 因為 C 值跨度很大，Streamlit 提供 select_slider 可以完美呈現對數級別的滑桿
+st.sidebar.header("⚙️ 參數設定")
+st.sidebar.subheader("k-NN 參數")
+k_val = st.sidebar.slider("選擇 k 值大小", min_value=1, max_value=20, value=3, step=1)
+
+st.sidebar.divider()
+
+st.sidebar.subheader("SVM 參數")
 c_options = [0.001, 0.01, 0.1, 1.0, 10.0, 50.0, 100.0]
-c_value = st.sidebar.select_slider("選擇 C 值大小 (懲罰係數)", options=c_options, value=1.0)
+c_val = st.sidebar.select_slider("選擇 C 值大小 (懲罰係數)", options=c_options, value=1.0)
 
 # ==========================================
-# 3. 按照作業要求生成 200 筆模擬資料
+# 3. 準備共用的資料與畫布
 # ==========================================
 @st.cache_data
 def load_data():
     np.random.seed(42)
     n_samples = 200
-    
-    # 產生特徵 1：每月讀書時間 (140~200 小時)
     study_hours = np.random.uniform(140, 200, n_samples)
-    # 產生特徵 2：每月作業練習題數 (30~100 題)
     practice_qs = np.random.uniform(30, 100, n_samples)
-    
     X = np.column_stack((study_hours, practice_qs))
-    
-    # 隱藏規則：加入一些隨機雜訊，讓資料邊界有重疊，這樣調整 C 值才會有感
     score = (study_hours - 140)/60 * 0.5 + (practice_qs - 30)/70 * 0.5 + np.random.normal(0, 0.2, n_samples)
-    
-    # 標籤 y：1 代表及格 (Green), 0 代表不及格 (Red)
     y = np.where(score > 0.5, 1, 0)
-    
     return X, y
 
 X, y = load_data()
 
-# ==========================================
-# 4. 建立 SVM 模型與預測
-# ==========================================
-# 這裡使用 rbf 核函數 (高斯核)，因為它對 C 值的變化最敏感、視覺化最明顯
-# 如果老師規定要用直線切，可以把 kernel 改成 'linear'
-svm_model = SVC(kernel='rbf', C=c_value)
-svm_model.fit(X, y)
-
-# 預測訓練資料 (為了計算指標)
-y_pred = svm_model.predict(X)
-
-# ==========================================
-# 5. 計算 Confusion Matrix 與效能指標
-# ==========================================
-tn, fp, fn, tp = confusion_matrix(y, y_pred).ravel()
-
-# 指標計算與防呆機制 (避免分母為 0)
-precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-accuracy = (tp + tn) / len(y)
-f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-error_rate = 1 - accuracy
-
-# ==========================================
-# 6. 在網頁上呈現效能指標
-# ==========================================
-st.subheader(f"📊 當 C = {c_value} 時的效能指標")
-st.write(f"**混淆矩陣 (Confusion Matrix):** TN = {tn}, FP = {fp}, FN = {fn}, TP = {tp}")
-
-col1, col2, col3, col4, col5, col6 = st.columns(6)
-col1.metric("Precision", f"{precision:.4f}")
-col2.metric("Recall", f"{recall:.4f}")
-col3.metric("Specificity", f"{specificity:.4f}")
-col4.metric("Accuracy", f"{accuracy:.4f}")
-col5.metric("F1-score", f"{f1_score:.4f}")
-col6.metric("Error rate", f"{error_rate:.4f}")
-
-st.divider()
-
-# ==========================================
-# 7. 繪製 2D 決策邊界圖
-# ==========================================
-st.subheader("🗺️ SVM 決策邊界視覺化 (Decision Boundary)")
-
-fig, ax = plt.subplots(figsize=(10, 5))
-
-# 設定網格點 (Meshgrid)
+# 建立共用的網格點 (Meshgrid)
 x_min, x_max = 135, 205
 y_min, y_max = 25, 105
-xx, yy = np.meshgrid(np.arange(x_min, x_max, 0.5),
-                     np.arange(y_min, y_max, 0.5))
+xx, yy = np.meshgrid(np.arange(x_min, x_max, 0.5), np.arange(y_min, y_max, 0.5))
 
-# 預測背景網格顏色
-Z = svm_model.predict(np.c_[xx.ravel(), yy.ravel()])
-Z = Z.reshape(xx.shape)
-
-# 作業要求：及格綠色(1)，不及格紅色(0)
 cmap_light = ListedColormap(['#fcded9', '#dcedc1'])
-ax.contourf(xx, yy, Z, cmap=cmap_light)
-
-# 畫出 200 筆原始資料點
 colors = ['red' if label == 0 else 'green' for label in y]
-ax.scatter(X[:, 0], X[:, 1], c=colors, edgecolors='k', s=25, alpha=0.8)
 
-# 加上圖例
-ax.scatter([], [], c='green', edgecolors='k', s=25, label='Pass (及格)')
-ax.scatter([], [], c='red', edgecolors='k', s=25, label='Fail (不及格)')
-ax.legend(loc='upper left')
+# 定義一個計算並印出指標的工具函數，讓程式碼更乾淨
+def display_metrics(y_true, y_pred):
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+    acc = (tp + tn) / len(y_true)
+    prec = tp / (tp + fp) if (tp + fp) > 0 else 0
+    rec = tp / (tp + fn) if (tp + fn) > 0 else 0
+    spec = tn / (tn + fp) if (tn + fp) > 0 else 0
+    f1 = 2 * (prec * rec) / (prec + rec) if (prec + rec) > 0 else 0
+    err = 1 - acc
+    
+    st.write(f"**混淆矩陣:** TN={tn}, FP={fp}, FN={fn}, TP={tp}")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Accuracy", f"{acc:.4f}")
+    m2.metric("Precision", f"{prec:.4f}")
+    m3.metric("Recall", f"{rec:.4f}")
+    m4, m5, m6 = st.columns(3)
+    m4.metric("Specificity", f"{spec:.4f}")
+    m5.metric("F1-score", f"{f1:.4f}")
+    m6.metric("Error Rate", f"{err:.4f}")
 
-ax.set_title(f"SVM Student Performance Classification (C={c_value})")
-ax.set_xlabel("Monthly Study Time (140~200 hours)")
-ax.set_ylabel("Monthly Practice Questions (30~100 Qs)")
-ax.spines['top'].set_visible(False)
-ax.spines['right'].set_visible(False)
+# ==========================================
+# 4. 畫面一分為二：左右對照
+# ==========================================
+# ⭐️ 考點：使用 st.columns(2) 將畫面切成左右兩欄
+col_knn, col_svm = st.columns(2)
 
-st.pyplot(fig)
+# ----------------- 左半邊：k-NN -----------------
+with col_knn:
+    st.header(f"🔷 k-NN (k={k_val})")
+    
+    # 訓練 k-NN 模型
+    knn = KNeighborsClassifier(n_neighbors=k_val, metric='chebyshev')
+    knn.fit(X, y)
+    y_pred_knn = knn.predict(X)
+    
+    # 顯示指標
+    display_metrics(y, y_pred_knn)
+    
+    # 繪圖
+    Z_knn = knn.predict(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
+    fig_knn, ax_knn = plt.subplots(figsize=(7, 5))
+    ax_knn.contourf(xx, yy, Z_knn, cmap=cmap_light)
+    ax_knn.scatter(X[:, 0], X[:, 1], c=colors, edgecolors='k', s=25, alpha=0.8)
+    ax_knn.set_title("k-NN Decision Boundary (Chebyshev)")
+    ax_knn.set_xlabel("Study Time")
+    ax_knn.set_ylabel("Practice Qs")
+    st.pyplot(fig_knn)
+
+# ----------------- 右半邊：SVM -----------------
+with col_svm:
+    st.header(f"🔶 SVM (C={c_val})")
+    
+    # 訓練 SVM 模型
+    svm = SVC(kernel='rbf', C=c_val)
+    svm.fit(X, y)
+    y_pred_svm = svm.predict(X)
+    
+    # 顯示指標
+    display_metrics(y, y_pred_svm)
+    
+    # 繪圖
+    Z_svm = svm.predict(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
+    fig_svm, ax_svm = plt.subplots(figsize=(7, 5))
+    ax_svm.contourf(xx, yy, Z_svm, cmap=cmap_light)
+    ax_svm.scatter(X[:, 0], X[:, 1], c=colors, edgecolors='k', s=25, alpha=0.8)
+    ax_svm.set_title("SVM Decision Boundary (RBF)")
+    ax_svm.set_xlabel("Study Time")
+    ax_svm.set_ylabel("Practice Qs")
+    st.pyplot(fig_svm)
